@@ -40,10 +40,10 @@ struct file_operations fops = {
 	.read = pseudodev_read
 };
 
-static int idev = 0;
 
 static int __init pseudodev_init(void){
 	int ret;
+	int idev = 0;
 
 	ret = alloc_chrdev_region(&my_pseudo_dev, BASE_MINOR, N_DEVICES, DEV_NAME);
 	if(ret){
@@ -52,7 +52,7 @@ static int __init pseudodev_init(void){
 	}
 	
 	cdev_init(&cdev1, &fops);
-	kobject_set_name(&cdev1.kobj, "pseudodev%d", idev++);
+	kobject_set_name(&cdev1.kobj, "pseudodev%d", idev);
 	ret = cdev_add(&cdev1, my_pseudo_dev, 1);
 
 	if(ret){
