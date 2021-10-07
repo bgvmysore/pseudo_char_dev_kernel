@@ -4,9 +4,12 @@
 #include <linux/fs.h>
 #include <linux/cdev.h>
 #include <linux/device.h>
+#include <linux/slab.h>
+#include <linux/uaccess.h>
 
 #define N_DEVICES  1
 #define BASE_MINOR 0
+#define MAX_SIZE   1024
 
 const char* DEV_NAME = "pseudodev";
 
@@ -16,6 +19,11 @@ struct class *pseudocls;
 struct device *pseudodevice;
 
 struct cdev cdev1;
+
+unsigned char *pseudo_buff;
+int read_offset  = 0;
+int write_offset = 0;
+int buff_len     = 0;
 
 int pseudodev_open(struct inode* inode, struct file* file){
 	printk("Pseudo Device: open method called.\n");
@@ -28,13 +36,60 @@ int pseudodev_close(struct inode* inode, struct file* file){
 }
 
 ssize_t pseudodev_read(struct file* file, char __user *buff, size_t size, loff_t* off){
+	
+	int ret = 0;
+	int rcnt = 0;	
+	
 	printk("Pseudo Device: read method called.\n");
-	return 0;
+
+	if(buff_len == 0){
+		printk("Pseudo Device: Empty.\n");
+		return 0;
+	}
+	
+	rcnt = size;
+	if(rcnt > buff_len){
+		rcnt = buff_len;
+	}
+
+	ret = copy_to_user(buff, pseudo_buff + read_offset, rcnt);
+	if(ret){
+		printk("Pseudo Device: Copy to user space failed.\n");
+		return -EFAULT;
+	}
+	
+	read_offset += rcnt;
+	buff_len -= rcnt;	
+
+	return rcnt;
 }
 
 ssize_t pseudodev_write(struct file* file, const char __user *buff, size_t size, loff_t* off){
+	
+	int ret = 0;
+	int wcnt = 0;	
+
 	printk("Pseudo Device: write method called.\n");
-	return -ENOSPC;
+
+	if(write_offset >= MAX_SIZE){
+		printk("Pseudo Device: buffer full.\n");
+		return -ENOSPC;
+	}
+	
+	wcnt = size;
+	if(wcnt > MAX_SIZE - write_offset){
+		wcnt = (MAX_SIZE - write_offset);
+	}
+	
+	ret = copy_from_user(pseudo_buff + write_offset, buff, wcnt);
+	if(ret){
+		printk("Pseudo Device: Copy from user space failed.\n");
+		return -EFAULT;
+	}
+	
+	write_offset += wcnt;
+	buff_len += wcnt;
+	return wcnt;
 }
 
 struct file_operations fops = {
@@ -74,13 +129,21 @@ static int __init pseudodev_init(void){
 		printk("pseudodev: Failed to create psedudo device.\n");
 		return -EINVAL;
 	}
-
+	
+	pseudo_buff = kmalloc(MAX_SIZE, GFP_KERNEL);
+	if(pseudo_buff == NULL){
+		printk("pseudodev: kmalloc failed.\n");
+		return -ENOMEM;
+	}
+	
 	printk("pseudodev: Successfully registered!...MajorID:%d, MinorID:%d\n", MAJOR(my_pseudo_dev), MINOR(my_pseudo_dev));
 	printk("Pseudo Device: Welcome!\n");
 	return 0;
 }
 
 static void __exit pseudodev_cleanup(void){
+	kfree(pseudo_buff);	
+
 	device_destroy(pseudocls, my_pseudo_dev);
 	unregister_chrdev_region(my_pseudo_dev, N_DEVICES);
 	class_destroy(pseudocls);
