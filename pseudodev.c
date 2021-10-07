@@ -3,6 +3,7 @@
 #include <linux/module.h>
 #include <linux/fs.h>
 #include <linux/cdev.h>
+#include <linux/device.h>
 
 #define N_DEVICES  1
 #define BASE_MINOR 0
@@ -10,6 +11,9 @@
 const char* DEV_NAME = "pseudodev";
 
 dev_t my_pseudo_dev;
+
+struct class *pseudocls;
+struct device *pseudodevice;
 
 struct cdev cdev1;
 
@@ -44,6 +48,12 @@ struct file_operations fops = {
 static int __init pseudodev_init(void){
 	int ret;
 	int idev = 0;
+	
+	pseudocls = class_create(THIS_MODULE, "pseudo_class");
+	if(pseudocls == NULL){
+		printk("pseudodev: Failed to create pseudo class.\n");
+		return -EINVAL;
+	}
 
 	ret = alloc_chrdev_region(&my_pseudo_dev, BASE_MINOR, N_DEVICES, DEV_NAME);
 	if(ret){
@@ -54,9 +64,14 @@ static int __init pseudodev_init(void){
 	cdev_init(&cdev1, &fops);
 	kobject_set_name(&cdev1.kobj, "pseudodev%d", idev);
 	ret = cdev_add(&cdev1, my_pseudo_dev, 1);
-
 	if(ret){
 		printk("pseudodev: Failed to add device.\n");
+		return -EINVAL;
+	}
+
+	pseudodevice = device_create(pseudocls, NULL, my_pseudo_dev, NULL, "psample%d", idev);
+	if(pseudodevice == NULL){
+		printk("pseudodev: Failed to create psedudo device.\n");
 		return -EINVAL;
 	}
 
@@ -66,8 +81,11 @@ static int __init pseudodev_init(void){
 }
 
 static void __exit pseudodev_cleanup(void){
+	device_destroy(pseudocls, my_pseudo_dev);
 	unregister_chrdev_region(my_pseudo_dev, N_DEVICES);
+	class_destroy(pseudocls);
 	printk("Pseudo Device: Bye!\n");
+
 }
 
 module_init(pseudodev_init);
