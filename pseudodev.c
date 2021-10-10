@@ -12,6 +12,11 @@
 #define BASE_MINOR 0
 #define MAX_SIZE   1024
 
+#define IOC_MAGIC 'p'
+#define MY_IOCTL_LEN      _IO(IOC_MAGIC, 1)
+#define MY_IOCTL_AVAIL    _IO(IOC_MAGIC, 2)
+#define MY_IOCTL_RESET    _IO(IOC_MAGIC, 3)
+
 const char* DEV_NAME = "pseudodev";
 
 dev_t my_pseudo_dev;
@@ -113,11 +118,28 @@ ssize_t pseudodev_write(struct file* file, const char __user *buff, size_t size,
 	return wcnt;
 }
 
+static long pseudodev_ioctl(struct file* file, unsigned int cmd, unsigned long arg){
+	printk("Pseudo Devide: IOCTL method called.\n");
+	switch(cmd){
+		case MY_IOCTL_LEN:
+			printk("Pseudo IOCTL: kfifo length: %d\n", kfifo_len(&kfifo1));
+			break;
+		case MY_IOCTL_AVAIL:
+			printk("Pseudo IOCTL: kfifo available: %d\n", kfifo_avail(&kfifo1));
+			break;
+		case MY_IOCTL_RESET:
+			printk("Pseudo IOCTL: kfifo reset.\n");
+			break;
+	}
+	return 0;
+}
+
 struct file_operations fops = {
 	.open = pseudodev_open,
 	.release = pseudodev_close,
 	.write = pseudodev_write,
-	.read = pseudodev_read
+	.read = pseudodev_read,
+	.unlocked_ioctl = pseudodev_ioctl
 };
 
 
