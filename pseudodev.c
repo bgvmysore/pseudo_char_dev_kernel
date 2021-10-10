@@ -6,6 +6,7 @@
 #include <linux/device.h>
 #include <linux/slab.h>
 #include <linux/uaccess.h>
+#include <linux/kfifo.h>
 
 #define N_DEVICES  1
 #define BASE_MINOR 0
@@ -19,6 +20,8 @@ struct class *pseudocls;
 struct device *pseudodevice;
 
 struct cdev cdev1;
+
+struct kfifo kfifo1;
 
 unsigned char *pseudo_buff;
 int read_offset  = 0;
@@ -39,25 +42,36 @@ ssize_t pseudodev_read(struct file* file, char __user *buff, size_t size, loff_t
 	
 	int ret = 0;
 	int rcnt = 0;	
-	
+	char* tbuff;	
+
 	printk("Pseudo Device: read method called.\n");
 
-	if(buff_len == 0){
+	if(kfifo_is_empty(&kfifo1)){
 		printk("Pseudo Device: Empty.\n");
 		return 0;
 	}
 	
 	rcnt = size;
-	if(rcnt > buff_len){
-		rcnt = buff_len;
+	if(rcnt > kfifo_len(&kfifo1)){
+		rcnt = kfifo_len(&kfifo1);
 	}
 
-	ret = copy_to_user(buff, pseudo_buff + read_offset, rcnt);
+	tbuff = kmalloc(rcnt, GFP_KERNEL);
+	
+	ret = kfifo_out(&kfifo1, tbuff, rcnt);
+	if(ret < 0){
+		printk("Pseudo Device: kfifo_out failed!\n");
+		return -EFAULT;
+	}
+	
+	ret = copy_to_user(buff, tbuff, rcnt);
 	if(ret){
 		printk("Pseudo Device: Copy to user space failed.\n");
 		return -EFAULT;
 	}
 	
+	kfree(tbuff);	
+
 	read_offset += rcnt;
 	buff_len -= rcnt;	
 
@@ -68,25 +82,32 @@ ssize_t pseudodev_write(struct file* file, const char __user *buff, size_t size,
 	
 	int ret = 0;
 	int wcnt = 0;	
+	char* tbuff;
 
 	printk("Pseudo Device: write method called.\n");
 
-	if(write_offset >= MAX_SIZE){
+	if(kfifo_is_full(&kfifo1)){
 		printk("Pseudo Device: buffer full.\n");
 		return -ENOSPC;
 	}
 	
 	wcnt = size;
-	if(wcnt > MAX_SIZE - write_offset){
-		wcnt = (MAX_SIZE - write_offset);
+	if(wcnt > kfifo_avail(&kfifo1)){
+		wcnt = kfifo_avail(&kfifo1);
 	}
 	
-	ret = copy_from_user(pseudo_buff + write_offset, buff, wcnt);
+	tbuff = kmalloc(wcnt, GFP_KERNEL);	
+
+	ret = copy_from_user(tbuff, buff, wcnt);
 	if(ret){
 		printk("Pseudo Device: Copy from user space failed.\n");
 		return -EFAULT;
 	}
+
+	kfifo_in(&kfifo1, tbuff, wcnt);
 	
+	kfree(tbuff);
+
 	write_offset += wcnt;
 	buff_len += wcnt;
 	return wcnt;
@@ -135,6 +156,8 @@ static int __init pseudodev_init(void){
 		printk("pseudodev: kmalloc failed.\n");
 		return -ENOMEM;
 	}
+
+	kfifo_init(&kfifo1, pseudo_buff, MAX_SIZE);
 	
 	printk("pseudodev: Successfully registered!...MajorID:%d, MinorID:%d\n", MAJOR(my_pseudo_dev), MINOR(my_pseudo_dev));
 	printk("Pseudo Device: Welcome!\n");
@@ -142,8 +165,9 @@ static int __init pseudodev_init(void){
 }
 
 static void __exit pseudodev_cleanup(void){
-	kfree(pseudo_buff);	
-
+	// kfree(pseudo_buff);	
+	
+	kfifo_free(&kfifo1);
 	device_destroy(pseudocls, my_pseudo_dev);
 	unregister_chrdev_region(my_pseudo_dev, N_DEVICES);
 	class_destroy(pseudocls);
